@@ -1,0 +1,18 @@
+# Byte-compiled files
+__pycache__/
+*.py[cod]
+
+# Python environments
+bin
+include
+lib
+lib64
+Scripts
+pyvenv.cfg
+
+# Distribution
+build
+dist
+
+# PyInstaller
+*.spec
