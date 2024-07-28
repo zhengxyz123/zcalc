@@ -1,5 +1,34 @@
+#!/usr/bin/python3
+# zcalc, a simple calculator.
+#
+# Copyright (c) 2024 zhengxyz123
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+import argparse
 import re
+import sys
 from typing import Iterator, NamedTuple
+
+
+__version__ = "0.9"
+keywords = ["exit", "get", "set", "solve", "diff", "int"]
 
 
 class ZCalcSyntaxError(Exception):
@@ -19,19 +48,37 @@ class Token(NamedTuple):
 
 
 def tokenize(code: str) -> Iterator[Token]:
-    keywords1 = ["exit", "get", "set", "solve", "diff", "int"]
-    keywords2 = ["and", "or", "xor", "not"]
-    operators = ["pow", "mul", "div", "plus", "minus", "range"]
+    operators = [
+        "pow",
+        "mul",
+        "div",
+        "mod",
+        "plus",
+        "minus",
+        "lshift",
+        "rshift",
+        "and",
+        "xor",
+        "or",
+        "not",
+    ]
     tokens = {
         "name": r"[A-Za-z_][A-Za-z0-9_]*",
+        "lpar": r"\(",
+        "rpar": r"\)",
         "pow": r"\*\*",
         "mul": r"\*",
         "div": r"/",
+        "mod": r"%",
         "plus": r"\+",
         "minus": r"\-",
+        "lshift": r"<<",
+        "rshift": r">>",
+        "and": r"&&",
+        "xor": r"\^",
+        "or": r"\|\|",
+        "not": r"!",
         "range": r"~",
-        "lpar": r"\(",
-        "rpar": r"\)",
         "equal": r"=",
         "comma": r",",
         "semi": r";",
@@ -48,11 +95,8 @@ def tokenize(code: str) -> Iterator[Token]:
         kind = mo.lastgroup
         value = mo.group()
         where = mo.start(), mo.end()
-        if kind == "name":
-            if value in keywords1:
-                kind = "keyword"
-            elif value in keywords2:
-                kind = "op"
+        if kind == "name" and value in keywords:
+            kind = "keyword"
         elif kind in operators:
             kind = "op"
         elif kind == "bnum":
@@ -77,5 +121,23 @@ def tokenize(code: str) -> Iterator[Token]:
         yield Token(kind, value, where)
 
 
+def main() -> int:
+    paraser = argparse.ArgumentParser(prog="zcalc", description="a simple calculator")
+    paraser.add_argument(
+        "-q", "--quiet", action="store_false", help="don't print initial banner"
+    )
+    paraser.add_argument(
+        "-v", "--version", action="version", version=f"zcalc {__version__}"
+    )
+    args = paraser.parse_args()
+    if not sys.stdin.isatty():
+        exprs = (s.strip() for s in sys.stdin.readlines())
+    if args.quiet:
+        print(f"zcalc {__version__}, a simple calculator")
+        print("Copyright (c) 2024 zhengxyz123")
+        print("This is an open source software released under MIT license.")
+    return 0
+
+
 if __name__ == "__main__":
-    pass
+    sys.exit(main())
