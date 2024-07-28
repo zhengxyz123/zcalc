@@ -41,9 +41,19 @@ class ZCalcSyntaxError(Exception):
         super().__init__(self.message)
 
 
+def display_error(error: Exception) -> None:
+    if isinstance(error, ZCalcSyntaxError):
+        print(f"    {error.code}")
+        highlight = " " * error.position[0] + "^"
+        if error.position[1] - error.position[0] > 1:
+            highlight += "~" * (error.position[1] - error.position[0] - 1)
+        print(f"    {highlight}")
+        print(error.message)
+
+
 class Token(NamedTuple):
     type: str | None
-    value: int | float | str
+    value: str | int | float
     where: tuple[int, int]
 
 
@@ -121,17 +131,104 @@ def tokenize(code: str) -> Iterator[Token]:
         yield Token(kind, value, where)
 
 
+class Statement(NamedTuple):
+    type: str
+    expr: list[Token]
+    aftersep: tuple[list[Token]] | None
+
+
+class Parser:
+    def __init__(self) -> None:
+        self._code = ""
+
+    def is_exit_stmt(self, tokens: list[Token]) -> bool:
+        if not (tokens[0].type == "keyword" and tokens[0].value == "exit"):
+            return False
+        if len(tokens) > 1:
+            raise ZCalcSyntaxError(
+                self._code,
+                (tokens[0].where[0], tokens[-1].where[1]),
+                'type "exit" is enough',
+            )
+        return True
+
+    def is_set_stmt(self, tokens: list[Token]) -> bool:
+        if not (tokens[0].type == "keyword" and tokens[0].value == "set"):
+            return False
+        if len(tokens) != 4:
+            raise ZCalcSyntaxError(self._code, tokens[0].where)
+        if not tokens[1].type == "name":
+            return False
+        if not tokens[2].type == "equal":
+            return False
+        if not tokens[3].type == "num":
+            return False
+        if not isinstance(tokens[3].value, int):
+            raise ZCalcSyntaxError(self._code, tokens[3].where, "the value should be an integer")
+        return True
+
+    def is_get_stmt(self, tokens: list[Token]) -> bool:
+        if not (tokens[0].type == "keyword" and tokens[0].value == "get"):
+            return False
+        if len(tokens) == 1:
+            raise ZCalcSyntaxError(self._code, tokens[0].where)
+        if len(tokens) > 2:
+            raise ZCalcSyntaxError(self._code, (tokens[2].where[0], tokens[-1].where[1]))
+        if not tokens[1].type == "name":
+            return False
+        return True
+
+    def is_calculus_stmt(self, tokens: list[Token]) -> bool:
+        if not (tokens[0].type == "keyword" and tokens[0].value in ["diff", "int"]):
+            return False
+        count_sep = 0
+        for token in tokens[1:]:
+            if token.type == "sep":
+                count_sep += 1
+        return count_sep == 1
+
+    def is_assignment_stmt(self, tokens: list[Token]) -> bool:
+        if len(tokens) < 3:
+            return False
+        if not tokens[0].type == "name":
+            return False
+        if not tokens[1].type == "equal":
+            return False
+        return True
+
+    def parse(self, code: str) -> Statement:
+        self._code = code
+        tokens = list(tokenize(self._code))
+        if self.is_exit_stmt(tokens):
+            return Statement("exit", [], None)
+        elif self.is_set_stmt(tokens):
+            return Statement("set", tokens[1:], None)
+        elif self.is_get_stmt(tokens):
+            return Statement("get", tokens[1:], None)
+        elif self.is_assignment_stmt(tokens):
+            return Statement("assign", tokens, None)
+        else:
+            return Statement("expr", tokens, None)
+
+
 def main() -> int:
-    paraser = argparse.ArgumentParser(prog="zcalc", description="a simple calculator")
-    paraser.add_argument(
+    parser = argparse.ArgumentParser(prog="zcalc", description="a simple calculator")
+    parser.add_argument(
         "-q", "--quiet", action="store_false", help="don't print initial banner"
     )
-    paraser.add_argument(
+    parser.add_argument(
         "-v", "--version", action="version", version=f"zcalc {__version__}"
     )
-    args = paraser.parse_args()
+    args = parser.parse_args()
+    parser = Parser()
     if not sys.stdin.isatty():
         exprs = (s.strip() for s in sys.stdin.readlines())
+        for expr in exprs:
+            try:
+                print(parser.parse(expr))
+            except ZCalcSyntaxError as error:
+                display_error(error)
+        return 0
     if args.quiet:
         print(f"zcalc {__version__}, a simple calculator")
         print("Copyright (c) 2024 zhengxyz123")
