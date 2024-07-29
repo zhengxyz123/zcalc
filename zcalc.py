@@ -43,12 +43,12 @@ class ZCalcSyntaxError(Exception):
 
 def display_error(error: Exception) -> None:
     if isinstance(error, ZCalcSyntaxError):
-        print(f"    {error.code}")
+        print(f"{error.message}:")
+        print(f"  {error.code}")
         highlight = " " * error.position[0] + "^"
         if error.position[1] - error.position[0] > 1:
             highlight += "~" * (error.position[1] - error.position[0] - 1)
-        print(f"    {highlight}")
-        print(error.message)
+        print(f"  {highlight}")
 
 
 class Token(NamedTuple):
@@ -91,7 +91,6 @@ def tokenize(code: str) -> Iterator[Token]:
         "range": r"~",
         "equal": r"=",
         "comma": r",",
-        "semi": r";",
         "sep": r"\|",
         "bnum": r"0b[01]+",
         "onum": r"0o[0-7]+",
@@ -134,7 +133,7 @@ def tokenize(code: str) -> Iterator[Token]:
 class Statement(NamedTuple):
     type: str
     expr: list[Token]
-    aftersep: tuple[list[Token]] | None
+    aftersep: list[Token] | None
 
 
 class Parser:
@@ -147,7 +146,7 @@ class Parser:
         if len(tokens) > 1:
             raise ZCalcSyntaxError(
                 self._code,
-                (tokens[0].where[0], tokens[-1].where[1]),
+                (tokens[1].where[0], tokens[-1].where[1]),
                 'type "exit" is enough',
             )
         return True
@@ -158,13 +157,15 @@ class Parser:
         if len(tokens) != 4:
             raise ZCalcSyntaxError(self._code, tokens[0].where)
         if not tokens[1].type == "name":
-            return False
+            raise ZCalcSyntaxError(self._code, tokens[1].where)
         if not tokens[2].type == "equal":
-            return False
+            raise ZCalcSyntaxError(self._code, tokens[2].where)
         if not tokens[3].type == "num":
-            return False
+            raise ZCalcSyntaxError(self._code, tokens[3].where)
         if not isinstance(tokens[3].value, int):
-            raise ZCalcSyntaxError(self._code, tokens[3].where, "the value should be an integer")
+            raise ZCalcSyntaxError(
+                self._code, tokens[3].where, "the value should be an integer"
+            )
         return True
 
     def is_get_stmt(self, tokens: list[Token]) -> bool:
@@ -173,19 +174,31 @@ class Parser:
         if len(tokens) == 1:
             raise ZCalcSyntaxError(self._code, tokens[0].where)
         if len(tokens) > 2:
-            raise ZCalcSyntaxError(self._code, (tokens[2].where[0], tokens[-1].where[1]))
+            raise ZCalcSyntaxError(
+                self._code, (tokens[2].where[0], tokens[-1].where[1])
+            )
         if not tokens[1].type == "name":
-            return False
+            raise ZCalcSyntaxError(self._code, tokens[1].where)
         return True
 
-    def is_calculus_stmt(self, tokens: list[Token]) -> bool:
-        if not (tokens[0].type == "keyword" and tokens[0].value in ["diff", "int"]):
+    def is_sdi_stmt(self, tokens: list[Token]) -> bool:
+        if not (
+            tokens[0].type == "keyword" and tokens[0].value in ["solve", "diff", "int"]
+        ):
             return False
         count_sep = 0
         for token in tokens[1:]:
             if token.type == "sep":
                 count_sep += 1
-        return count_sep == 1
+            if count_sep > 1:
+                raise ZCalcSyntaxError(self._code, token.where, 'found one more "|"')
+        if count_sep == 0:
+            raise ZCalcSyntaxError(
+                self._code,
+                (tokens[1].where[0], tokens[-1].where[1]),
+                'must have one "|"',
+            )
+        return True
 
     def is_assignment_stmt(self, tokens: list[Token]) -> bool:
         if len(tokens) < 3:
@@ -205,10 +218,33 @@ class Parser:
             return Statement("set", tokens[1:], None)
         elif self.is_get_stmt(tokens):
             return Statement("get", tokens[1:], None)
+        elif self.is_sdi_stmt(tokens):
+            return self.parse_sdi_stmt(tokens)
         elif self.is_assignment_stmt(tokens):
             return Statement("assign", tokens, None)
         else:
             return Statement("expr", tokens, None)
+
+    def parse_sdi_stmt(self, tokens: list[Token]) -> Statement:
+        sep_pos = 0
+        for token in tokens:
+            if token.type == "sep":
+                sep_pos = tokens.index(token)
+        expr, aftersep = tokens[1:sep_pos], tokens[sep_pos + 1 :]
+        if not self.is_assignment_stmt(aftersep):
+            if len(aftersep) > 0:
+                raise ZCalcSyntaxError(
+                    self._code,
+                    (aftersep[0].where[0], aftersep[-1].where[1]),
+                    "must assign something",
+                )
+            else:
+                raise ZCalcSyntaxError(
+                    self._code,
+                    (len(self._code), len(self._code) + 1),
+                    "must forget something",
+                )
+        return Statement(str(tokens[0].value), expr, aftersep)
 
 
 def main() -> int:
@@ -225,7 +261,8 @@ def main() -> int:
         exprs = (s.strip() for s in sys.stdin.readlines())
         for expr in exprs:
             try:
-                print(parser.parse(expr))
+                if len(expr) > 0:
+                    print(parser.parse(expr))
             except ZCalcSyntaxError as error:
                 display_error(error)
         return 0
