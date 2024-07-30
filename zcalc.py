@@ -22,6 +22,7 @@
 # SOFTWARE.
 
 import argparse
+import math
 import re
 import sys
 from typing import Iterator, NamedTuple
@@ -31,107 +32,34 @@ __version__ = "0.9"
 keywords = ["exit", "get", "set", "solve", "diff", "int"]
 
 
-class ZCalcSyntaxError(Exception):
+class ZCalcError(Exception):
     def __init__(
         self, code: str, position: tuple[int, int], message: str | None = None
     ) -> None:
         self.code = code
         self.position = position
-        self.message = message or f"syntax error at column {position[0] + 1}"
+        self.message = message or f"found an error at column {position[0] + 1}"
         super().__init__(self.message)
 
 
-def display_error(error: Exception) -> None:
-    if isinstance(error, ZCalcSyntaxError):
-        print(f"{error.message}:")
-        print(f"  {error.code}")
-        highlight = " " * error.position[0] + "^"
-        if error.position[1] - error.position[0] > 1:
-            highlight += "~" * (error.position[1] - error.position[0] - 1)
-        print(f"  {highlight}")
+def display_error(error: ZCalcError) -> None:
+    print(f"{error.message}:")
+    print(f"  {error.code}")
+    highlight = " " * error.position[0] + "^"
+    if error.position[1] - error.position[0] > 1:
+        highlight += "~" * (error.position[1] - error.position[0] - 1)
+    print(f"  {highlight}")
 
 
 class Token(NamedTuple):
-    type: str | None
+    type: str
     value: str | int | float
     where: tuple[int, int]
 
 
-def tokenize(code: str) -> Iterator[Token]:
-    operators = [
-        "pow",
-        "mul",
-        "div",
-        "mod",
-        "plus",
-        "minus",
-        "lshift",
-        "rshift",
-        "and",
-        "xor",
-        "or",
-        "not",
-    ]
-    tokens = {
-        "name": r"[A-Za-z_][A-Za-z0-9_]*",
-        "lpar": r"\(",
-        "rpar": r"\)",
-        "pow": r"\*\*",
-        "mul": r"\*",
-        "div": r"/",
-        "mod": r"%",
-        "plus": r"\+",
-        "minus": r"\-",
-        "lshift": r"<<",
-        "rshift": r">>",
-        "and": r"&&",
-        "xor": r"\^",
-        "or": r"\|\|",
-        "not": r"!",
-        "range": r"~",
-        "equal": r"=",
-        "comma": r",",
-        "sep": r"\|",
-        "bnum": r"0b[01]+",
-        "onum": r"0o[0-7]+",
-        "hnum": r"0x[0-9a-fA-F]+",
-        "dnum": r"[+\-]?\d+(\.\d*)?([Ee][+\-]?\d+)?",
-        "skip": r"[ \t]+",
-        "error": r".",
-    }
-    regex = "|".join(f"(?P<{name}>{text})" for name, text in tokens.items())
-    for mo in re.finditer(regex, code):
-        kind = mo.lastgroup
-        value = mo.group()
-        where = mo.start(), mo.end()
-        if kind == "name" and value in keywords:
-            kind = "keyword"
-        elif kind in operators:
-            kind = "op"
-        elif kind == "bnum":
-            kind = "num"
-            value = int(value, base=2)
-        elif kind == "onum":
-            kind = "num"
-            value = int(value, base=8)
-        elif kind == "hnum":
-            kind = "num"
-            value = int(value, base=16)
-        elif kind == "dnum":
-            kind = "num"
-            if "." in value or "e" in value.lower():
-                value = float(value)
-            else:
-                value = int(value)
-        elif kind == "skip":
-            continue
-        elif kind == "error":
-            raise ZCalcSyntaxError(code, where)
-        yield Token(kind, value, where)
-
-
 class Statement(NamedTuple):
     type: str
+    code: str
     expr: list[Token]
     aftersep: list[Token] | None
 
@@ -139,49 +67,124 @@ class Statement(NamedTuple):
 class Parser:
     def __init__(self) -> None:
         self._code = ""
+        self._priorities = {
+            "**": 7,
+            "*": 6,
+            "/": 6,
+            "%": 6,
+            "+": 5,
+            "-": 5,
+            "<<": 4,
+            ">>": 4,
+            "&&": 3,
+            "^": 2,
+            "||": 1,
+            "!": 0,
+        }
+        self._functions = {
+            "abs": (math.fabs, 1),
+            "acos": (math.acos, 1),
+            "scosh": (math.acosh, 1),
+            "asin": (math.asin, 1),
+            "asinh": (math.asinh, 1),
+            "atan": (math.atan, 1),
+            "atan2": (math.atan2, 2),
+            "atanh": (math.atanh, 1),
+            "comb": (math.comb, 2),
+            "cos": (math.cos, 1),
+            "cosh": (math.cosh, 1),
+            "erf": (math.erf, 1),
+            "erfc": (math.erfc, 1),
+            "exp": (math.exp, 1),
+            "expm1": (math.expm1, 1),
+            "gamma": (math.gamma, 1),
+            "lgamma": (math.lgamma, 1),
+            "lg": (math.log10, 1),
+            "ln": (math.log, 1),
+            "log": (math.log, 2),
+            "perm": (math.perm, 2),
+            "sin": (math.sin, 1),
+            "sinh": (math.sinh, 1),
+            "sqrt": (math.sqrt, 1),
+            "tan": (math.tan, 1),
+        }
+        if sys.version_info >= (3, 11):
+            self._functions.setdefault("cbrt", (math.cbrt, 1))
+        self._variables: dict[str, int | float] = {
+            "e": math.e,
+            "phi": (math.sqrt(5) - 1) / 2,
+            "pi": math.pi,
+            "tau": math.tau,
+        }
 
-    def is_exit_stmt(self, tokens: list[Token]) -> bool:
+    def _shunting_yard(self, tokens: list[Token]) -> list[Token]:
+        output, stack = [], []
+        for token in tokens:
+            if token.type in ["name", "num"]:
+                output.append(token)
+            elif token.type == "op":
+                if (
+                    len(stack) != 0
+                    and stack[-1].type != "lpar"
+                    and self._priorities[stack[-1].value]
+                    > self._priorities[str(token.value)]
+                ):
+                    output.append(stack.pop())
+                stack.append(token)
+            elif token.type == "lpar":
+                stack.append(token)
+            elif token.type == "rpar":
+                while len(stack) != 0 and stack[-1].type != "lpar":
+                    output.append(stack.pop())
+                if len(stack) != 0 and stack[-1].type == "lpar":
+                    stack.pop()
+        while len(stack) != 0:
+            op = stack.pop()
+            if op.type == "lpar":
+                raise ZCalcError(self._code, op, 'missing ")"')
+            output.append(stack.pop())
+        return output
+
+    def _is_exit_stmt(self, tokens: list[Token]) -> bool:
         if not (tokens[0].type == "keyword" and tokens[0].value == "exit"):
             return False
         if len(tokens) > 1:
-            raise ZCalcSyntaxError(
+            raise ZCalcError(
                 self._code,
                 (tokens[1].where[0], tokens[-1].where[1]),
                 'type "exit" is enough',
             )
         return True
 
-    def is_set_stmt(self, tokens: list[Token]) -> bool:
+    def _is_set_stmt(self, tokens: list[Token]) -> bool:
         if not (tokens[0].type == "keyword" and tokens[0].value == "set"):
             return False
         if len(tokens) != 4:
-            raise ZCalcSyntaxError(self._code, tokens[0].where)
+            raise ZCalcError(self._code, tokens[0].where)
         if not tokens[1].type == "name":
-            raise ZCalcSyntaxError(self._code, tokens[1].where)
+            raise ZCalcError(self._code, tokens[1].where)
         if not tokens[2].type == "equal":
-            raise ZCalcSyntaxError(self._code, tokens[2].where)
+            raise ZCalcError(self._code, tokens[2].where)
         if not tokens[3].type == "num":
-            raise ZCalcSyntaxError(self._code, tokens[3].where)
+            raise ZCalcError(self._code, tokens[3].where)
         if not isinstance(tokens[3].value, int):
-            raise ZCalcSyntaxError(
+            raise ZCalcError(
                 self._code, tokens[3].where, "the value should be an integer"
             )
         return True
 
-    def is_get_stmt(self, tokens: list[Token]) -> bool:
+    def _is_get_stmt(self, tokens: list[Token]) -> bool:
         if not (tokens[0].type == "keyword" and tokens[0].value == "get"):
             return False
         if len(tokens) == 1:
-            raise ZCalcSyntaxError(self._code, tokens[0].where)
+            raise ZCalcError(self._code, tokens[0].where)
         if len(tokens) > 2:
-            raise ZCalcSyntaxError(
-                self._code, (tokens[2].where[0], tokens[-1].where[1])
-            )
+            raise ZCalcError(self._code, (tokens[2].where[0], tokens[-1].where[1]))
         if not tokens[1].type == "name":
-            raise ZCalcSyntaxError(self._code, tokens[1].where)
+            raise ZCalcError(self._code, tokens[1].where)
         return True
 
-    def is_sdi_stmt(self, tokens: list[Token]) -> bool:
+    def _is_sdi_stmt(self, tokens: list[Token]) -> bool:
         if not (
             tokens[0].type == "keyword" and tokens[0].value in ["solve", "diff", "int"]
         ):
@@ -191,16 +194,16 @@ class Parser:
             if token.type == "sep":
                 count_sep += 1
             if count_sep > 1:
-                raise ZCalcSyntaxError(self._code, token.where, 'found one more "|"')
+                raise ZCalcError(self._code, token.where, 'found one more "|"')
         if count_sep == 0:
-            raise ZCalcSyntaxError(
+            raise ZCalcError(
                 self._code,
                 (tokens[1].where[0], tokens[-1].where[1]),
                 'must have one "|"',
             )
         return True
 
-    def is_assignment_stmt(self, tokens: list[Token]) -> bool:
+    def _is_assignment_stmt(self, tokens: list[Token]) -> bool:
         if len(tokens) < 3:
             return False
         if not tokens[0].type == "name":
@@ -209,42 +212,114 @@ class Parser:
             return False
         return True
 
-    def parse(self, code: str) -> Statement:
-        self._code = code
-        tokens = list(tokenize(self._code))
-        if self.is_exit_stmt(tokens):
-            return Statement("exit", [], None)
-        elif self.is_set_stmt(tokens):
-            return Statement("set", tokens[1:], None)
-        elif self.is_get_stmt(tokens):
-            return Statement("get", tokens[1:], None)
-        elif self.is_sdi_stmt(tokens):
-            return self.parse_sdi_stmt(tokens)
-        elif self.is_assignment_stmt(tokens):
-            return Statement("assign", tokens, None)
-        else:
-            return Statement("expr", tokens, None)
-
-    def parse_sdi_stmt(self, tokens: list[Token]) -> Statement:
+    def _parse_sdi_stmt(self, tokens: list[Token]) -> Statement:
         sep_pos = 0
         for token in tokens:
             if token.type == "sep":
                 sep_pos = tokens.index(token)
         expr, aftersep = tokens[1:sep_pos], tokens[sep_pos + 1 :]
-        if not self.is_assignment_stmt(aftersep):
+        if not self._is_assignment_stmt(aftersep):
             if len(aftersep) > 0:
-                raise ZCalcSyntaxError(
+                raise ZCalcError(
                     self._code,
                     (aftersep[0].where[0], aftersep[-1].where[1]),
                     "must assign something",
                 )
             else:
-                raise ZCalcSyntaxError(
+                raise ZCalcError(
                     self._code,
                     (len(self._code), len(self._code) + 1),
                     "must forget something",
                 )
-        return Statement(str(tokens[0].value), expr, aftersep)
+        return Statement(str(tokens[0].value), self._code, expr, aftersep)
+
+    def tokenize(self, code: str) -> Iterator[Token]:
+        operators = [
+            "pow",
+            "mul",
+            "div",
+            "mod",
+            "plus",
+            "minus",
+            "lshift",
+            "rshift",
+            "and",
+            "xor",
+            "or",
+            "not",
+        ]
+        tokens = {
+            "name": r"[A-Za-z_][A-Za-z0-9_]*",
+            "lpar": r"\(",
+            "rpar": r"\)",
+            "pow": r"\*\*",
+            "mul": r"\*",
+            "div": r"/",
+            "mod": r"%",
+            "plus": r"\+",
+            "minus": r"\-",
+            "lshift": r"<<",
+            "rshift": r">>",
+            "and": r"&&",
+            "xor": r"\^",
+            "or": r"\|\|",
+            "not": r"!",
+            "range": r"~",
+            "equal": r"=",
+            "comma": r",",
+            "sep": r"\|",
+            "bnum": r"0b[01]+",
+            "onum": r"0o[0-7]+",
+            "hnum": r"0x[0-9a-fA-F]+",
+            "dnum": r"[+\-]?\d+(\.\d*)?([Ee][+\-]?\d+)?",
+            "skip": r"[ \t]+",
+            "error": r".",
+        }
+        regex = "|".join(f"(?P<{name}>{text})" for name, text in tokens.items())
+        for mo in re.finditer(regex, code):
+            kind = str(mo.lastgroup)
+            value = mo.group()
+            where = mo.start(), mo.end()
+            if kind == "name" and value in keywords:
+                kind = "keyword"
+            elif kind in operators:
+                kind = "op"
+            elif kind == "bnum":
+                kind = "num"
+                value = int(value, base=2)
+            elif kind == "onum":
+                kind = "num"
+                value = int(value, base=8)
+            elif kind == "hnum":
+                kind = "num"
+                value = int(value, base=16)
+            elif kind == "dnum":
+                kind = "num"
+                if "." in value or "e" in value.lower():
+                    value = float(value)
+                else:
+                    value = int(value)
+            elif kind == "skip":
+                continue
+            elif kind == "error":
+                raise ZCalcError(code, where)
+            yield Token(kind, value, where)
+
+    def parse(self, code: str) -> Statement:
+        self._code = code
+        tokens = list(self.tokenize(self._code))
+        if self._is_exit_stmt(tokens):
+            return Statement("exit", self._code, [], None)
+        elif self._is_set_stmt(tokens):
+            return Statement("set", self._code, tokens[1:], None)
+        elif self._is_get_stmt(tokens):
+            return Statement("get", self._code, tokens[1:], None)
+        elif self._is_sdi_stmt(tokens):
+            return self._parse_sdi_stmt(tokens)
+        elif self._is_assignment_stmt(tokens):
+            return Statement("assign", self._code, tokens, None)
+        else:
+            return Statement("expr", self._code, tokens, None)
 
 
 def main() -> int:
@@ -263,7 +338,7 @@ def main() -> int:
             try:
                 if len(expr) > 0:
                     print(parser.parse(expr))
-            except ZCalcSyntaxError as error:
+            except ZCalcError as error:
                 display_error(error)
         return 0
     if args.quiet:
