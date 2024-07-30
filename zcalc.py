@@ -47,7 +47,7 @@ def display_error(error: ZCalcError) -> None:
     print(f"  {error.code}")
     highlight = " " * error.position[0] + "^"
     if error.position[1] - error.position[0] > 1:
-        highlight += "~" * (error.position[1] - error.position[0] - 1)
+        highlight += "^" * (error.position[1] - error.position[0] - 1)
     print(f"  {highlight}")
 
 
@@ -64,7 +64,7 @@ class Statement(NamedTuple):
     aftersep: list[Token] | None
 
 
-class Parser:
+class Context:
     def __init__(self) -> None:
         self._code = ""
         self._priorities = {
@@ -118,16 +118,32 @@ class Parser:
         }
 
     def _shunting_yard(self, tokens: list[Token]) -> list[Token]:
+        def _get_priority(op: str) -> int:
+            if op in self._functions:
+                return 8
+            else:
+                return self._priorities[op]
+
         output, stack = [], []
         for token in tokens:
-            if token.type in ["name", "num"]:
+            if token.type == "keyword":
+                raise ZCalcError(self._code, token.where)
+            if token.type == "num":
                 output.append(token)
+            elif token.type == "name":
+                if token.value in self._functions:
+                    stack.append(token)
+                else:
+                    output.append(token)
+            elif token.type == "comma":
+                while len(stack) != 0 and stack[-1].type != "lpar":
+                    output.append(stack.pop())
             elif token.type == "op":
                 if (
                     len(stack) != 0
                     and stack[-1].type != "lpar"
-                    and self._priorities[stack[-1].value]
-                    > self._priorities[str(token.value)]
+                    and _get_priority(str(stack[-1].value))
+                    > _get_priority(str(token.value))
                 ):
                     output.append(stack.pop())
                 stack.append(token)
@@ -138,11 +154,13 @@ class Parser:
                     output.append(stack.pop())
                 if len(stack) != 0 and stack[-1].type == "lpar":
                     stack.pop()
+                else:
+                    raise ZCalcError(self._code, token.where, 'missing "("')
         while len(stack) != 0:
             op = stack.pop()
             if op.type == "lpar":
-                raise ZCalcError(self._code, op, 'missing ")"')
-            output.append(stack.pop())
+                raise ZCalcError(self._code, op.where, 'missing ")"')
+            output.append(op)
         return output
 
     def _is_exit_stmt(self, tokens: list[Token]) -> bool:
@@ -210,6 +228,8 @@ class Parser:
             return False
         if not tokens[1].type == "equal":
             return False
+        if tokens[0].value in ["e", "phi", "pi", "tau"]:
+            raise ZCalcError(self._code, tokens[0].where, "can't assign const variable")
         return True
 
     def _parse_sdi_stmt(self, tokens: list[Token]) -> Statement:
@@ -302,7 +322,7 @@ class Parser:
             elif kind == "skip":
                 continue
             elif kind == "error":
-                raise ZCalcError(code, where)
+                raise ZCalcError(code, where, f'unknown symbol "{value}"')
             yield Token(kind, value, where)
 
     def parse(self, code: str) -> Statement:
@@ -321,6 +341,38 @@ class Parser:
         else:
             return Statement("expr", self._code, tokens, None)
 
+    def execute(self, stmt: Statement) -> int | float:
+        stack = []
+        for token in self._shunting_yard(stmt.expr):
+            if token.value == "+":
+                stack.append(stack.pop() + stack.pop())
+            elif token.value == "-":
+                if len(stack) == 1:
+                    stack[-1] = -stack[-1]
+                else:
+                    a, b = stack.pop(), stack.pop()
+                    stack.append(b - a)
+            elif token.value == "*":
+                stack.append(stack.pop() * stack.pop())
+            elif token.value == "/":
+                try:
+                    a, b = stack.pop(), stack.pop()
+                    stack.append(b / a)
+                except ZeroDivisionError:
+                    raise ZCalcError(self._code, token.where, "division by zero")
+            elif token.value == "%":
+                try:
+                    a, b = stack.pop(), stack.pop()
+                    stack.append(b % a)
+                except ZeroDivisionError:
+                    raise ZCalcError(self._code, token.where, "integer modulo by zero")
+            elif token.value == "**":
+                a, b = stack.pop(), stack.pop()
+                stack.append(b**a)
+            else:
+                stack.append(token.value)
+        return stack[-1]
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(prog="zcalc", description="a simple calculator")
@@ -331,13 +383,15 @@ def main() -> int:
         "-v", "--version", action="version", version=f"zcalc {__version__}"
     )
     args = parser.parse_args()
-    parser = Parser()
+
+    ctx = Context()
     if not sys.stdin.isatty():
         exprs = (s.strip() for s in sys.stdin.readlines())
         for expr in exprs:
             try:
                 if len(expr) > 0:
-                    print(parser.parse(expr))
+                    if (expr := ctx.parse(expr)).type == "expr":
+                        print(ctx.execute(expr))
             except ZCalcError as error:
                 display_error(error)
         return 0
