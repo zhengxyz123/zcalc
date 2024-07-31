@@ -565,17 +565,17 @@ class Context:
     def assign(self, stmt: Statement) -> None:
         name = str(stmt.expr[0].value)
         expr = stmt.expr[2:]
+        if name in self._functions:
+            raise ZCalcError(
+                self._code, stmt.expr[0].where, "can't assign a name of function"
+            )
         try:
-            result = self.calculate(self._shunting_yard(expr))
+            result = self.calculate(expr)
         except IndexError:
             raise ZCalcError(
                 self._code, (expr[0].where[0], expr[-1].where[1]), "invalid expression"
             )
         self._variables[name] = result
-        if name in self._functions:
-            raise ZCalcError(
-                self._code, stmt.expr[0].where, "can't assign a name of function"
-            )
         if not self.redirected_stdin:
             print(f"{name}={self._num2str(self._variables[name])}")
 
