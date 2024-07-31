@@ -523,6 +523,7 @@ class Context:
                         raise ZCalcError(self._code, token.where)
                     else:
                         args = stack[-nargs:]
+                        del stack[-nargs:]
                         stack.append(func(*args))
                 else:
                     raise ZCalcError(
@@ -532,7 +533,8 @@ class Context:
                 stack.append(token.value)
             else:
                 raise ZCalcError(self._code, token.where)
-        if not isinstance(stack[-1], (int, float)) or len(stack) > 1:
+            print(stack)
+        if not isinstance(stack[-1], (int, float)) or not len(stack) == 1:
             orig_tokens = sorted(exprs, key=lambda expr: expr.where[0])
             raise ZCalcError(
                 self._code,
@@ -576,7 +578,7 @@ class Context:
                 self._code, stmt.expr[0].where, "can't assign a name of function"
             )
         if not self.redirected_stdin:
-            print(f"{name}={self._variables[name]}")
+            print(f"{name}={self._num2str(self._variables[name])}")
 
     def execute(self, code: str) -> None:
         self._code = code
