@@ -533,7 +533,6 @@ class Context:
                 stack.append(token.value)
             else:
                 raise ZCalcError(self._code, token.where)
-            print(stack)
         if not isinstance(stack[-1], (int, float)) or not len(stack) == 1:
             orig_tokens = sorted(exprs, key=lambda expr: expr.where[0])
             raise ZCalcError(
