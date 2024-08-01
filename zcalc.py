@@ -92,9 +92,9 @@ class Symbol:
     id = ""
     lbp = 0
 
-    def __init__(self, parser: "Parser", value: str | None = None):
+    def __init__(self, parser: "Parser", value: Any = None):
         self.parser = parser
-        self.value = value or self.id
+        self.value = self.id if value is None else value
         self.first = None
         self.second = None
 
@@ -609,9 +609,12 @@ class Context:
             return Statement("expr", tokens, None)
 
     def calculate(self, tokens: list[Token]) -> int | float:
-        return expr_parser.parse(self._code, tokens).eval(
-            self._functions | self._variables
-        )
+        try:
+            return expr_parser.parse(self._code, tokens).eval(
+                    self._functions | self._variables
+                )
+        except ZeroDivisionError:
+            raise ZCalcError(self._code, message="division by zero")
 
     def get_setting(self, stmt: Statement) -> None:
         name = stmt.expr[0].value
