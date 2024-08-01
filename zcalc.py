@@ -23,10 +23,11 @@
 
 import argparse
 import math
+import operator
 import re
 import sys
 from fractions import Fraction
-from typing import Iterator, NamedTuple
+from typing import Any, Iterator, NamedTuple
 
 try:
     import readline
@@ -37,17 +38,42 @@ except ModuleNotFoundError:
     is_rl_available = False
 
 __version__ = "0.9"
-keywords = ["exit", "get", "set", "solve", "sum", "diff", "int"]
+operators_reg = {
+    "**": operator.pow,
+    "*": operator.mul,
+    "/": operator.truediv,
+    "%": operator.mod,
+    "+": operator.add,
+    "-": operator.sub,
+    "<<": operator.lshift,
+    ">>": operator.rshift,
+    "&&": operator.and_,
+    "^": operator.xor,
+    "||": operator.or_,
+}
 
 
 class ZCalcError(Exception):
     def __init__(
-        self, code: str, position: tuple[int, int], message: str | None = None
+        self,
+        code: str,
+        position: tuple[int, int] | None = None,
+        message: str | None = None,
     ) -> None:
         self.code = code
         self.position = position
-        self.message = message or f"found an error at column {position[0] + 1}"
+        self.message = message or f"found an error"
         super().__init__(self.message)
+
+
+def display_error(error: ZCalcError) -> None:
+    print(f"{error.message}:")
+    print(f"  {error.code}")
+    if error.position:
+        highlight = " " * error.position[0] + "^" * (
+            error.position[1] - error.position[0]
+        )
+        print(f"  {highlight}")
 
 
 class Token(NamedTuple):
@@ -58,66 +84,217 @@ class Token(NamedTuple):
 
 class Statement(NamedTuple):
     type: str
-    code: str
     expr: list[Token]
     aftersep: list[Token] | None
 
 
-def display_error(error: ZCalcError) -> None:
-    print(f"{error.message}:")
-    print(f"  {error.code}")
-    highlight = " " * error.position[0] + "^"
-    if error.position[1] - error.position[0] > 1:
-        highlight += "^" * (error.position[1] - error.position[0] - 1)
-    print(f"  {highlight}")
+class Symbol:
+    id = ""
+    lbp = 0
+
+    def __init__(self, parser: "Parser", value: str | None = None):
+        self.parser = parser
+        self.value = value or self.id
+        self.first = None
+        self.second = None
+
+    def nud(self):
+        raise NotImplementedError
+
+    def led(self, left: "Symbol") -> "Symbol":
+        raise NotImplementedError
+
+    def eval(self, var: dict) -> Any:
+        raise NotImplementedError
+
+
+class Literal(Symbol):
+    def nud(self) -> Symbol:
+        return self
+
+
+class Infix(Symbol):
+    right_ssoc = False
+
+    def led(self, left: Symbol) -> Symbol:
+        self.first = left
+        rbp = self.lbp - int(self.right_ssoc)
+        self.second = self.parser.expression(rbp)
+        return self
+
+    def eval(self, var) -> Any:
+        return operators_reg[self.value](self.first.eval(var), self.second.eval(var))
+
+
+class InfixR(Infix):
+    right_assoc = True
+
+
+class Prefix(Symbol):
+    def nud(self) -> Symbol:
+        self.first = self.parser.expression(80)
+        return self
+
+    def eval(self, var) -> Any:
+        return operators_reg[self.value](self.first)  # type: ignore
+
+
+class Parser:
+    def __init__(self) -> None:
+        self._code = ""
+        self.symbol_table = {}
+        self.define("end")
+        self.tokens = iter(())
+        self.token: Any = None
+
+    def define(self, sid: str, bp: int | None = 0, symbol_class=Symbol):
+        sym = self.symbol_table[sid] = type(
+            symbol_class.__name__, (symbol_class,), {"id": sid, "lbp": bp}
+        )
+
+        def wrapper(val: type[Symbol]) -> type[Symbol]:
+            val.id = sid
+            val.lbp = sym.lbp
+            self.symbol_table[sid] = val
+            return val
+
+        return wrapper
+
+    def expression(self, rbp: int) -> Symbol:
+        tok = self.token
+        self.advance()
+        left = tok.nud()
+        while rbp < self.token.lbp:
+            tok = self.token
+            self.advance()
+            left = tok.led(left)
+        return left
+
+    def advance(self, value=None) -> Symbol:
+        symbol = self.token
+        if value and value not in [symbol.value, symbol.id]:
+            raise ZCalcError(self._code, message=f"expected '{value}'")
+        try:
+            token = next(self.tokens)
+            if token.type in self.symbol_table:
+                symbol_class = self.symbol_table[token.type]
+            elif token.value in self.symbol_table:
+                symbol_class = self.symbol_table[token.value]
+            else:
+                raise ZCalcError(self._code, token.where, "unknown symbol")
+            self.token = symbol_class(self, token.value)
+        except StopIteration:
+            self.token = self.symbol_table["end"](self)
+        return self.token
+
+    def parse(self, source: str, tokens: list[Token]) -> Any:
+        try:
+            self._code = source
+            self.tokens = iter(tokens)
+            self.advance()
+            return self.expression(0)
+        finally:
+            self.tokens = iter([])
+            self.token = None
+
+
+expr_parser = Parser()
+expr_parser.define("+", 1, Infix)
+expr_parser.define("*", 2, Infix)
+expr_parser.define("/", 2, Infix)
+expr_parser.define("%", 2, Infix)
+expr_parser.define("**", 3, InfixR)
+
+
+@expr_parser.define("num")
+class Number(Literal):
+    def eval(self, var: dict):
+        return self.value
+
+
+@expr_parser.define("name")
+class Reference(Literal):
+    def eval(self, var: dict) -> Any:
+        try:
+            return var[self.value]
+        except KeyError:
+            raise ZCalcError(
+                self.parser._code, message=f"missing reference '{self.value}'"
+            )
+
+
+@expr_parser.define("-", 1)
+class Minus(Infix, Prefix):
+    def eval(self, var: dict) -> Any:
+        if self.second is None:
+            return operator.neg(self.first.eval(var))
+        return super(Minus, self).eval(var)  # type: ignore
+
+
+expr_parser.define(",")
+expr_parser.define(")")
+
+
+@expr_parser.define("(", 90)
+class FunctionCall(Symbol):
+    def nud(self) -> Symbol:
+        expr = self.parser.expression(0)
+        self.parser.advance(")")
+        return expr
+
+    def led(self, left: Symbol) -> Symbol:
+        self.first = left
+        self.second = []
+        p = self.parser
+        while p.token.value != ")":
+            self.second.append(p.expression(0))
+            if p.token.value != ",":
+                break
+            p.advance(",")
+        p.advance(")")
+        return self
+
+    def eval(self, var: dict) -> Any:
+        try:
+            return var[self.first.value](*(val.eval(var) for val in self.second))
+        except KeyError as error:
+            raise ZCalcError(
+                self.parser._code, message=f"invalid function '{error.args[0]}'"
+            )
 
 
 class Context:
     def __init__(self) -> None:
         self._code = ""
-        self._priorities = {
-            "**": 7,
-            "*": 6,
-            "/": 6,
-            "%": 6,
-            "+": 5,
-            "-": 5,
-            "<<": 4,
-            ">>": 4,
-            "&&": 3,
-            "^": 2,
-            "||": 1,
-            "!": 0,
-        }
         self._functions = {
-            "abs": (math.fabs, 1),
-            "acos": (math.acos, 1),
-            "scosh": (math.acosh, 1),
-            "asin": (math.asin, 1),
-            "asinh": (math.asinh, 1),
-            "atan": (math.atan, 1),
-            "atan2": (math.atan2, 2),
-            "atanh": (math.atanh, 1),
-            "comb": (math.comb, 2),
-            "cos": (math.cos, 1),
-            "cosh": (math.cosh, 1),
-            "erf": (math.erf, 1),
-            "erfc": (math.erfc, 1),
-            "exp": (math.exp, 1),
-            "expm1": (math.expm1, 1),
-            "gamma": (math.gamma, 1),
-            "lgamma": (math.lgamma, 1),
-            "lg": (math.log10, 1),
-            "ln": (math.log, 1),
-            "log": (math.log, 2),
-            "perm": (math.perm, 2),
-            "sin": (math.sin, 1),
-            "sinh": (math.sinh, 1),
-            "sqrt": (math.sqrt, 1),
-            "tan": (math.tan, 1),
+            "abs": math.fabs,
+            "acos": math.acos,
+            "scosh": math.acosh,
+            "asin": math.asin,
+            "asinh": math.asinh,
+            "atan": math.atan,
+            "atan2": math.atan2,
+            "atanh": math.atanh,
+            "comb": math.comb,
+            "cos": math.cos,
+            "cosh": math.cosh,
+            "erf": math.erf,
+            "erfc": math.erfc,
+            "exp": math.exp,
+            "expm1": math.expm1,
+            "gamma": math.gamma,
+            "lgamma": math.lgamma,
+            "lg": math.log10,
+            "ln": math.log,
+            "log": math.log,
+            "perm": math.perm,
+            "sin": math.sin,
+            "sinh": math.sinh,
+            "sqrt": math.sqrt,
+            "tan": math.tan,
         }
         if sys.version_info >= (3, 11):
-            self._functions.setdefault("cbrt", (math.cbrt, 1))
+            self._functions.setdefault("cbrt", math.cbrt)
         self._settings: dict[str, int] = {
             "enable_num2str": 1,
             "num2str_max_num1": 1000,
@@ -129,56 +306,6 @@ class Context:
             "tau": math.tau,
         }
         self.redirected_stdin = False
-
-    def _shunting_yard(self, tokens: list[Token]) -> list[Token]:
-        def _get_priority(op: str) -> int:
-            if op in self._functions:
-                return 8
-            else:
-                return self._priorities[op]
-
-        output, stack = [], []
-        for token in tokens:
-            if token.type == "keyword":
-                raise ZCalcError(self._code, token.where)
-            elif token.type == "equal":
-                raise ZCalcError(
-                    self._code, token.where, '"=" can\'t be used in expression'
-                )
-            elif token.type == "num":
-                output.append(token)
-            elif token.type == "name":
-                if token.value in self._functions:
-                    stack.append(token)
-                else:
-                    output.append(token)
-            elif token.type == "comma":
-                while len(stack) != 0 and stack[-1].type != "lpar":
-                    output.append(stack.pop())
-            elif token.type == "op":
-                if (
-                    len(stack) != 0
-                    and stack[-1].type != "lpar"
-                    and _get_priority(str(stack[-1].value))
-                    > _get_priority(str(token.value))
-                ):
-                    output.append(stack.pop())
-                stack.append(token)
-            elif token.type == "lpar":
-                stack.append(token)
-            elif token.type == "rpar":
-                while len(stack) != 0 and stack[-1].type != "lpar":
-                    output.append(stack.pop())
-                if len(stack) != 0 and stack[-1].type == "lpar":
-                    stack.pop()
-                else:
-                    raise ZCalcError(self._code, token.where, 'missing "("')
-        while len(stack) != 0:
-            op = stack.pop()
-            if op.type == "lpar":
-                raise ZCalcError(self._code, op.where, 'missing ")"')
-            output.append(op)
-        return output
 
     def _simplify(self, value: int) -> tuple[int, int]:
         flag = 1 if value > 0 else -1
@@ -316,25 +443,19 @@ class Context:
             raise ZCalcError(
                 self._code,
                 (tokens[1].where[0], tokens[-1].where[1]),
-                'type "exit" is enough',
+                "type 'exit' is enough",
             )
         return True
 
     def _is_set_stmt(self, tokens: list[Token]) -> bool:
         if not (tokens[0].type == "keyword" and tokens[0].value == "set"):
             return False
-        if len(tokens) != 4:
+        if len(tokens) < 4:
             raise ZCalcError(self._code, tokens[0].where)
         if not tokens[1].type == "name":
             raise ZCalcError(self._code, tokens[1].where)
         if not tokens[2].type == "equal":
             raise ZCalcError(self._code, tokens[2].where)
-        if not tokens[3].type == "num":
-            raise ZCalcError(self._code, tokens[3].where)
-        if not isinstance(tokens[3].value, int):
-            raise ZCalcError(
-                self._code, tokens[3].where, "the value should be an integer"
-            )
         return True
 
     def _is_get_stmt(self, tokens: list[Token]) -> bool:
@@ -398,9 +519,10 @@ class Context:
                     (len(self._code), len(self._code) + 1),
                     "must forget something",
                 )
-        return Statement(str(tokens[0].value), self._code, expr, aftersep)
+        return Statement(str(tokens[0].value), expr, aftersep)
 
     def tokenize(self, code: str) -> Iterator[Token]:
+        keywords = ["exit", "get", "set", "solve", "sum", "diff", "int"]
         operators = [
             "pow",
             "mul",
@@ -469,78 +591,27 @@ class Context:
             elif kind == "skip":
                 continue
             elif kind == "error":
-                raise ZCalcError(code, where, f'unknown symbol "{value}"')
+                raise ZCalcError(code, where, f"unknown symbol '{value}'")
             yield Token(kind, value, where)
 
     def parse(self, tokens: list[Token]) -> Statement:
         if self._is_exit_stmt(tokens):
-            return Statement("exit", self._code, [], None)
+            return Statement("exit", [], None)
         elif self._is_set_stmt(tokens):
-            return Statement("set", self._code, tokens[1:], None)
+            return Statement("set", tokens[1:], None)
         elif self._is_get_stmt(tokens):
-            return Statement("get", self._code, tokens[1:], None)
+            return Statement("get", tokens[1:], None)
         elif self._is_ssdi_stmt(tokens):
             return self._parse_ssdi_stmt(tokens)
         elif self._is_assignment_stmt(tokens):
-            return Statement("assign", self._code, tokens, None)
+            return Statement("assign", tokens, None)
         else:
-            return Statement("expr", self._code, tokens, None)
+            return Statement("expr", tokens, None)
 
-    def calculate(self, exprs: list[Token]) -> int | float:
-        stack = []
-        for token in self._shunting_yard(exprs):
-            if token.value == "+":
-                stack.append(stack.pop() + stack.pop())
-            elif token.value == "-":
-                if len(stack) == 1:
-                    stack[-1] = -stack[-1]
-                else:
-                    a, b = stack.pop(), stack.pop()
-                    stack.append(b - a)
-            elif token.value == "*":
-                stack.append(stack.pop() * stack.pop())
-            elif token.value == "/":
-                try:
-                    a, b = stack.pop(), stack.pop()
-                    stack.append(b / a)
-                except ZeroDivisionError:
-                    raise ZCalcError(self._code, token.where, "division by zero")
-            elif token.value == "%":
-                try:
-                    a, b = stack.pop(), stack.pop()
-                    stack.append(b % a)
-                except ZeroDivisionError:
-                    raise ZCalcError(self._code, token.where, "integer modulo by zero")
-            elif token.value == "**":
-                a, b = stack.pop(), stack.pop()
-                stack.append(b**a)
-            elif token.type == "name":
-                if token.value in self._variables:
-                    stack.append(self._variables[token.value])
-                elif token.value in self._functions:
-                    func, nargs = self._functions[token.value]
-                    if nargs > len(stack):
-                        raise ZCalcError(self._code, token.where)
-                    else:
-                        args = stack[-nargs:]
-                        del stack[-nargs:]
-                        stack.append(func(*args))
-                else:
-                    raise ZCalcError(
-                        self._code, token.where, f'name "{token.value}" is not defined'
-                    )
-            elif token.type == "num":
-                stack.append(token.value)
-            else:
-                raise ZCalcError(self._code, token.where)
-        if not isinstance(stack[-1], (int, float)) or not len(stack) == 1:
-            orig_tokens = sorted(exprs, key=lambda expr: expr.where[0])
-            raise ZCalcError(
-                self._code,
-                (orig_tokens[0].where[0], orig_tokens[-1].where[1]),
-                "invalid expression",
-            )
-        return stack[-1]
+    def calculate(self, tokens: list[Token]) -> int | float:
+        return expr_parser.parse(self._code, tokens).eval(
+            self._functions | self._variables
+        )
 
     def get_setting(self, stmt: Statement) -> None:
         name = stmt.expr[0].value
@@ -548,18 +619,18 @@ class Context:
             print(f"{name}={self._settings[name]}")
         else:
             raise ZCalcError(
-                self._code, stmt.expr[0].where, f'setting name "{name}" is not defined'
+                self._code, stmt.expr[0].where, f"setting name '{name}' is not defined"
             )
 
     def set_setting(self, stmt: Statement) -> None:
         name = stmt.expr[0].value
         if name in self._settings:
-            self._settings[name] = int(stmt.expr[2].value)
+            self._settings[name] = int(self.calculate(stmt.expr[2:]))
             if not self.redirected_stdin:
                 print(f"{name}={self._settings[name]}")
         else:
             raise ZCalcError(
-                self._code, stmt.expr[0].where, f'setting name "{name}" is not defined'
+                self._code, stmt.expr[0].where, f"setting name '{name}' is not defined"
             )
 
     def assign(self, stmt: Statement) -> None:
@@ -569,12 +640,7 @@ class Context:
             raise ZCalcError(
                 self._code, stmt.expr[0].where, "can't assign a name of function"
             )
-        try:
-            result = self.calculate(expr)
-        except IndexError:
-            raise ZCalcError(
-                self._code, (expr[0].where[0], expr[-1].where[1]), "invalid expression"
-            )
+        result = self.calculate(expr)
         self._variables[name] = result
         if not self.redirected_stdin:
             print(f"{name}={self._num2str(self._variables[name])}")
@@ -592,14 +658,7 @@ class Context:
         elif stmt.type == "assign":
             self.assign(stmt)
         elif stmt.type == "expr":
-            try:
-                print(self._num2str(self.calculate(stmt.expr)))
-            except IndexError:
-                raise ZCalcError(
-                    self._code,
-                    (stmt.expr[0].where[0], stmt.expr[-1].where[1]),
-                    "invalid expression",
-                )
+            print(self._num2str(self.calculate(stmt.expr)))
 
 
 def main() -> int:
@@ -633,7 +692,7 @@ def main() -> int:
             expr = input(">>> ")
         except (EOFError, KeyboardInterrupt):
             print()
-            continue
+            sys.exit(0)
         try:
             ctx.execute(expr)
         except ZCalcError as error:
