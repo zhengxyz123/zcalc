@@ -319,6 +319,7 @@ class Context:
             "num2str_max_num2": 1000,
         }
         self._variables: dict[str, int | float] = {
+            "ans": 0,
             "e": math.e,
             "pi": math.pi,
             "tau": math.tau,
@@ -519,7 +520,7 @@ class Context:
             return False
         if not tokens[1].type == "equal":
             return False
-        if tokens[0].value in ["e", "pi", "tau"]:
+        if tokens[0].value in ["ans", "e", "pi", "tau"]:
             raise ZCalcError(self._code, tokens[0].where, "can't assign const variable")
         return True
 
@@ -637,6 +638,7 @@ class Context:
                 self._functions | self._variables
             )
             if isinstance(ret, support_types):
+                self._variables["ans"] = ret
                 return ret
             else:
                 raise ZCalcError(
