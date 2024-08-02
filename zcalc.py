@@ -239,7 +239,7 @@ class Range(Infix):
         return ZRange(self.first.eval(var), self.second.eval(var))
 
 
-@expr_parser.define("-", 1)
+@expr_parser.define("-", 7)
 class Minus(Infix, Prefix):
     def eval(self, var: dict) -> Any:
         if self.second is None:
