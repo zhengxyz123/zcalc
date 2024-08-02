@@ -69,7 +69,7 @@ class ZCalcError(Exception):
 def display_error(error: ZCalcError) -> None:
     print(f"{error.message}:")
     print(f"  {error.code}")
-    if error.position and error.position[0] != error.position[1]:
+    if error.position:
         highlight = " " * error.position[0] + "^" * (
             error.position[1] - error.position[0]
         )
@@ -97,9 +97,8 @@ class Symbol:
     id = ""
     lbp = 0
 
-    def __init__(self, parser: "Parser", token: Token, value: Any = None):
+    def __init__(self, parser: "Parser", value: Any = None):
         self.parser = parser
-        self.token = token
         self.value = self.id if value is None else value
         self.first = None
         self.second = None
@@ -147,7 +146,7 @@ class Prefix(Symbol):
 
 class Parser:
     def __init__(self) -> None:
-        self._code = ""
+        self.source = ""
         self.symbol_table = {}
         self.define("end")
         self.tokens = iter([])
@@ -179,7 +178,7 @@ class Parser:
     def advance(self, value=None) -> Symbol:
         symbol = self.token
         if value and value not in [symbol.value, symbol.id]:
-            raise ZCalcError(self._code, symbol.token.where, f"expected '{value}'")
+            raise ZCalcError(self.source, message=f"expected '{value}'")
         try:
             token = next(self.tokens)
             if token.type in self.symbol_table:
@@ -187,15 +186,15 @@ class Parser:
             elif token.value in self.symbol_table:
                 symbol_class = self.symbol_table[token.value]
             else:
-                raise ZCalcError(self._code, token.where, "unknown symbol")
-            self.token = symbol_class(self, token, token.value)
+                raise ZCalcError(self.source, message=f"unknown symbol '{token.value}'")
+            self.token = symbol_class(self, token.value)
         except StopIteration:
-            self.token = self.symbol_table["end"](self, Token("end", "end", (0, 0)))
+            self.token = self.symbol_table["end"](self)
         return self.token
 
     def parse(self, source: str, tokens: list[Token]) -> Any:
         try:
-            self._code = source
+            self.source = source
             self.tokens = iter(tokens)
             self.advance()
             return self.expression(0)
@@ -230,7 +229,7 @@ class Reference(Literal):
             return var[self.value]
         except KeyError:
             raise ZCalcError(
-                self.parser._code, self.token.where, f"missing reference '{self.value}'"
+                self.parser.source, message=f"missing reference '{self.value}'"
             )
 
 
@@ -276,9 +275,7 @@ class FunctionCall(Symbol):
             return var[self.first.value](*(val.eval(var) for val in self.second))
         except KeyError as error:
             raise ZCalcError(
-                self.parser._code,
-                self.token.where,
-                f"invalid function '{error.args[0]}'",
+                self.parser.source, message=f"invalid function '{error.args[0]}'"
             )
 
 
@@ -384,7 +381,9 @@ class Context:
         twice: bool = False,
     ) -> str | None:
         if isinstance(value, int) and self._settings["base"] in [2, 8, 16]:
-            return [str, bin, str, oct, hex][int(math.log2(self._settings["base"]))](value)
+            return [str, bin, str, oct, hex][int(math.log2(self._settings["base"]))](
+                value
+            )
         value = round(value, self._settings["precision"])
         if self._settings["enable_num2str"] == 0:
             return str(value)
@@ -645,6 +644,8 @@ class Context:
                     (tokens[0].where[0], tokens[-1].where[1]),
                     "unsupported return type",
                 )
+        except ZCalcError as error:
+            raise error
         except Exception as error:
             raise ZCalcError(
                 self._code,
@@ -689,6 +690,8 @@ class Context:
     def execute(self, code: str) -> None:
         self._code = code
         tokens = list(self.tokenize(code))
+        if len(tokens) == 0:
+            return
         stmt = self.parse(tokens)
         if stmt.type == "exit":
             sys.exit(0)
