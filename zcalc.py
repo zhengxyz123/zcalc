@@ -317,6 +317,7 @@ class Context:
             "enable_num2str": 1,
             "num2str_max_num1": 1000,
             "num2str_max_num2": 1000,
+            "num2str_max_num3": 100,
         }
         self._variables: dict[str, int | float] = {
             "ans": 0,
@@ -370,7 +371,7 @@ class Context:
                 or abs(b**2) > self._settings["num2str_max_num1"]
             ):
                 return
-            if math.isclose(a + b, n, rel_tol=1e-15):
+            if math.isclose(a + b, n, rel_tol=1e-16):
                 return int(round(math.copysign(a**2, a))), int(
                     round(math.copysign(b**2, b))
                 )
@@ -396,14 +397,14 @@ class Context:
             .limit_denominator(self._settings["num2str_max_num2"])
             .as_integer_ratio()
         )
-        if math.isclose(value, a / b):
+        if math.isclose(value, a / b, rel_tol=1e-16):
             return f"{a}/{b}"
         a, b = (
             Fraction(value**2)
             .limit_denominator(self._settings["num2str_max_num2"])
             .as_integer_ratio()
         )
-        if math.isclose(value**2, a / b):
+        if math.isclose(value**2, a / b, rel_tol=1e-16):
             if b == 1:
                 outer, inner = self._simplify(a)
                 return f"{flag}{'' if outer == 1 else outer}sqrt({inner})"
@@ -426,7 +427,7 @@ class Context:
                 if s in ["1", "-1"]:
                     s = flag
                 return s + pi
-        for c in range(1, 101):
+        for c in range(1, self._settings["num2str_max_num3"] + 1):
             if (l := self._num2sqrts(value * c)) is not None:
                 outer_a, inner_a = self._simplify(l[0])
                 outer_b, inner_b = self._simplify(l[1])
