@@ -499,6 +499,8 @@ class Context:
             and tokens[0].value in ["solve", "sum", "diff", "int"]
         ):
             return False
+        if len(tokens) < 2:
+            raise ZCalcError(self._code, tokens[0].where, "syntax error")
         count_sep = 0
         for token in tokens[1:]:
             if token.type == "sep":
