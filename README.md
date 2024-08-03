@@ -3,13 +3,13 @@ zhengxyz123's calculator. A simple scientific calculator in 1,000 lines!
 
 ## Usage
 Type
-```python
+```bash
 python3 zcalc.py
 ```
 in command line to enter interactive mode.
 
 Or type
-```python
+```bash
 echo "1+2+3+4+5" | python3 zcalc.py
 ```
 to calculate the expression immediately.

@@ -378,7 +378,7 @@ class Context:
                 or abs(b**2) > self._settings["num2str_max_num1"]
             ):
                 return
-            if math.isclose(a + b, n, rel_tol=1e-16):
+            if math.isclose(a + b, n, rel_tol=1e-12):
                 return int(round(math.copysign(a**2, a))), int(
                     round(math.copysign(b**2, b))
                 )
@@ -404,14 +404,14 @@ class Context:
             .limit_denominator(self._settings["num2str_max_num2"])
             .as_integer_ratio()
         )
-        if math.isclose(value, a / b, rel_tol=1e-16):
+        if math.isclose(value, a / b, rel_tol=1e-12):
             return f"{a}/{b}"
         a, b = (
             Fraction(value**2)
             .limit_denominator(self._settings["num2str_max_num2"])
             .as_integer_ratio()
         )
-        if math.isclose(value**2, a / b, rel_tol=1e-16):
+        if math.isclose(value**2, a / b, rel_tol=1e-12):
             if b == 1:
                 outer, inner = self._simplify(a)
                 return f"{flag}{'' if outer == 1 else outer}sqrt({inner})"
