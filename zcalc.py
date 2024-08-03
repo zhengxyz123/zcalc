@@ -282,6 +282,7 @@ class FunctionCall(Symbol):
 class Context:
     def __init__(self) -> None:
         self._code = ""
+        self._keywords = ["exit", "get", "set", "solve", "sum", "diff", "int"]
         self._functions = {
             "abs": math.fabs,
             "acos": math.acos,
@@ -326,6 +327,12 @@ class Context:
             "tau": math.tau,
         }
         self.redirected_stdin = False
+        if is_rl_available and __name__ == "__main__":
+            readline.parse_and_bind("tab:complete")  # type: ignore
+            readline.set_completer(self._rl_completer)  # type: ignore
+
+    def _rl_completer(self, text: str, state: int) -> str | None:
+        pass
 
     def _simplify(self, value: int) -> tuple[int, int]:
         flag = 1 if value > 0 else -1
@@ -549,7 +556,6 @@ class Context:
         return Statement(str(tokens[0].value), expr, aftersep)
 
     def tokenize(self, code: str) -> Iterator[Token]:
-        keywords = ["exit", "get", "set", "solve", "sum", "diff", "int"]
         operators = [
             "pow",
             "mul",
@@ -596,7 +602,7 @@ class Context:
             kind = str(mo.lastgroup)
             value = mo.group()
             where = mo.start(), mo.end()
-            if kind == "name" and value in keywords:
+            if kind == "name" and value in self._keywords:
                 kind = "keyword"
             elif kind in operators:
                 kind = "op"
@@ -692,6 +698,59 @@ class Context:
         if not self.redirected_stdin:
             print(f"{name}={self._num2str(self._variables[name])}")
 
+    def sum(self, stmt: Statement) -> None:
+        assert stmt.aftersep
+        var_name = str(stmt.aftersep[0].value)
+        var_range: ZRange = self.calculate(stmt.aftersep[2:], ZRange)
+        if not (
+            isinstance(var_range.start, int)
+            and isinstance(var_range.end, int)
+            and var_range.start < var_range.end
+        ):
+            raise ZCalcError(
+                self._code,
+                (stmt.aftersep[2].where[0], stmt.aftersep[-1].where[1]),
+                "invalid range",
+            )
+        prev_var = self._variables.get(var_name)
+        now = var_range.start
+        result = 0
+        while now <= var_range.end:
+            self._variables[var_name] = now
+            result += self.calculate(stmt.expr, int, float)
+            now += 1
+        if prev_var:
+            self._variables[var_name] = prev_var
+        else:
+            del self._variables[var_name]
+        self._variables["ans"] = result
+        print(result)
+
+    def _diff(self, expr: list[Token], var_name: str, x: int | float) -> int | float:
+        h = 1e-8
+        prev_var = self._variables.get(var_name)
+        self._variables[var_name] = x + 2 * h
+        f1 = self.calculate(expr, int, float)
+        self._variables[var_name] = x + h
+        f2 = self.calculate(expr, int, float)
+        self._variables[var_name] = x - h
+        f3 = self.calculate(expr, int, float)
+        self._variables[var_name] = x - 2 * h
+        f4 = self.calculate(expr, int, float)
+        if prev_var:
+            self._variables[var_name] = prev_var
+        else:
+            del self._variables[var_name]
+        return (-f1 + 8 * f2 - 8 * f3 + f4) / (12 * h)
+
+    def diff(self, stmt: Statement) -> None:
+        assert stmt.aftersep
+        var_name = str(stmt.aftersep[0].value)
+        var_value = self.calculate(stmt.aftersep[2:], int, float)
+        result = self._diff(stmt.expr, var_name, var_value)
+        self._variables["ans"] = result
+        print(result)
+
     def execute(self, code: str) -> None:
         self._code = code
         tokens = list(self.tokenize(code))
@@ -706,6 +765,10 @@ class Context:
             self.set_setting(stmt)
         elif stmt.type == "assign":
             self.assign(stmt)
+        elif stmt.type == "sum":
+            self.sum(stmt)
+        elif stmt.type == "diff":
+            self.diff(stmt)
         elif stmt.type == "expr":
             print(self._num2str(self.calculate(stmt.expr, int, float)))
 
