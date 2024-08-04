@@ -404,36 +404,38 @@ class Context:
             .limit_denominator(self._settings["num2str_max_num2"])
             .as_integer_ratio()
         )
-        if math.isclose(value, a / b, rel_tol=1e-12):
+        if math.isclose(value, a / b):
+            if b == 1:
+                return f"{a}"
             return f"{a}/{b}"
         a, b = (
             Fraction(value**2)
             .limit_denominator(self._settings["num2str_max_num2"])
             .as_integer_ratio()
         )
-        if math.isclose(value**2, a / b, rel_tol=1e-12):
+        if math.isclose(value**2, a / b):
             if b == 1:
                 outer, inner = self._simplify(a)
                 return f"{flag}{'' if outer == 1 else outer}sqrt({inner})"
             elif (a == 1) and (b != 1):
                 return f"{flag}sqrt({b})/{b}"
-            else:
-                outer, inner = self._simplify(a * b)
-                fact = math.gcd(outer, b)
-                a, b = int(outer / fact), int(b / fact)
-                return f"{flag}{'' if a == 1 else a}sqrt({inner})/{b}"
+            outer, inner = self._simplify(a * b)
+            fact = math.gcd(outer, b)
+            a, b = int(outer / fact), int(b / fact)
+            return f"{flag}{'' if a == 1 else a}sqrt({inner})/{b}"
         if twice:
             return
         if (s := self._num2str(value / math.pi, twice=True)) is not None:
             pi = chr(960)
+            if s == "0":
+                return "0"
             if s.startswith("-1/") or s.startswith("1/"):
                 return s.replace("1/", pi + "/")
             elif "/" in s:
                 return s.replace("/", pi + "/")
-            else:
-                if s in ["1", "-1"]:
-                    s = flag
-                return s + pi
+            if s in ["1", "-1"]:
+                s = flag
+            return s + pi
         for c in range(1, self._settings["num2str_max_num3"] + 1):
             if (l := self._num2sqrts(value * c)) is not None:
                 outer_a, inner_a = self._simplify(l[0])
@@ -719,7 +721,6 @@ class Context:
         assert stmt.aftersep
         var_name = str(stmt.aftersep[0].value)
         var_value = self.calculate(stmt.aftersep[2:], int, float)
-        prev_var = self._variables.get(var_name)
         self._variables[var_name] = var_value
         prev, now = (
             var_value
@@ -744,10 +745,7 @@ class Context:
         else:
             print(f"{var_name}={self._num2str(now)}")
             self._variables["ans"] = now
-        if prev_var:
-            self._variables[var_name] = prev_var
-        else:
-            del self._variables[var_name]
+            self._variables[var_name] = now
 
     def sum(self, stmt: Statement) -> None:
         assert stmt.aftersep
