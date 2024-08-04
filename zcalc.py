@@ -555,6 +555,23 @@ class Context:
                 )
         return Statement(str(tokens[0].value), expr, aftersep)
 
+    def _diff(self, expr: list[Token], var_name: str, x: int | float) -> int | float:
+        h = 1e-8
+        prev_var = self._variables.get(var_name)
+        self._variables[var_name] = x + 2 * h
+        f1 = self.calculate(expr, int, float)
+        self._variables[var_name] = x + h
+        f2 = self.calculate(expr, int, float)
+        self._variables[var_name] = x - h
+        f3 = self.calculate(expr, int, float)
+        self._variables[var_name] = x - 2 * h
+        f4 = self.calculate(expr, int, float)
+        if prev_var:
+            self._variables[var_name] = prev_var
+        else:
+            del self._variables[var_name]
+        return (-f1 + 8 * f2 - 8 * f3 + f4) / (12 * h)
+
     def tokenize(self, code: str) -> Iterator[Token]:
         operators = [
             "pow",
@@ -698,6 +715,40 @@ class Context:
         if not self.redirected_stdin:
             print(f"{name}={self._num2str(self._variables[name])}")
 
+    def solve(self, stmt: Statement) -> None:
+        assert stmt.aftersep
+        var_name = str(stmt.aftersep[0].value)
+        var_value = self.calculate(stmt.aftersep[2:], int, float)
+        prev_var = self._variables.get(var_name)
+        self._variables[var_name] = var_value
+        prev, now = (
+            var_value
+            - self.calculate(stmt.expr, int, float)
+            / self._diff(stmt.expr, var_name, var_value),
+            0,
+        )
+        loop_count, failed = 0, True
+        while loop_count <= 10000:
+            self._variables[var_name] = prev
+            fp = self._diff(stmt.expr, var_name, prev)
+            if fp == 0:
+                break
+            now = prev - self.calculate(stmt.expr, int, float) / fp
+            if math.isclose(prev, now, rel_tol=1e-15):
+                failed = False
+                break
+            prev = now
+            loop_count += 1
+        if failed:
+            print("no solution")
+        else:
+            print(f"{var_name}={self._num2str(now)}")
+            self._variables["ans"] = now
+        if prev_var:
+            self._variables[var_name] = prev_var
+        else:
+            del self._variables[var_name]
+
     def sum(self, stmt: Statement) -> None:
         assert stmt.aftersep
         var_name = str(stmt.aftersep[0].value)
@@ -726,23 +777,6 @@ class Context:
         self._variables["ans"] = result
         print(result)
 
-    def _diff(self, expr: list[Token], var_name: str, x: int | float) -> int | float:
-        h = 1e-8
-        prev_var = self._variables.get(var_name)
-        self._variables[var_name] = x + 2 * h
-        f1 = self.calculate(expr, int, float)
-        self._variables[var_name] = x + h
-        f2 = self.calculate(expr, int, float)
-        self._variables[var_name] = x - h
-        f3 = self.calculate(expr, int, float)
-        self._variables[var_name] = x - 2 * h
-        f4 = self.calculate(expr, int, float)
-        if prev_var:
-            self._variables[var_name] = prev_var
-        else:
-            del self._variables[var_name]
-        return (-f1 + 8 * f2 - 8 * f3 + f4) / (12 * h)
-
     def diff(self, stmt: Statement) -> None:
         assert stmt.aftersep
         var_name = str(stmt.aftersep[0].value)
@@ -765,6 +799,8 @@ class Context:
             self.set_setting(stmt)
         elif stmt.type == "assign":
             self.assign(stmt)
+        elif stmt.type == "solve":
+            self.solve(stmt)
         elif stmt.type == "sum":
             self.sum(stmt)
         elif stmt.type == "diff":
