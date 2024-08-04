@@ -765,17 +765,17 @@ class Context:
             )
         prev_var = self._variables.get(var_name)
         now = var_range.start
-        result = 0
+        results = []
         while now <= var_range.end:
             self._variables[var_name] = now
-            result += self.calculate(stmt.expr, int, float)
+            results.append(self.calculate(stmt.expr, int, float))
             now += 1
         if prev_var:
             self._variables[var_name] = prev_var
         else:
             del self._variables[var_name]
-        self._variables["ans"] = result
-        print(result)
+        self._variables["ans"] = math.fsum(results)
+        print(self._num2str(self._variables["ans"]))
 
     def diff(self, stmt: Statement) -> None:
         assert stmt.aftersep
