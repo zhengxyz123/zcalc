@@ -97,20 +97,20 @@ class Symbol:
     id = ""
     lbp = 0
 
-    def __init__(self, parser: "Parser", value: Any = None):
+    def __init__(self, parser: "Parser", value: Any = None) -> None:
         self.parser = parser
         self.value = self.id if value is None else value
         self.first = None
         self.second = None
 
     def nud(self) -> "Symbol":
-        raise NotImplementedError
+        raise NotImplementedError("")
 
     def led(self, left: "Symbol") -> "Symbol":
-        raise NotImplementedError
+        raise NotImplementedError("")
 
     def eval(self, var: dict) -> Any:
-        raise NotImplementedError
+        raise NotImplementedError("")
 
 
 class Literal(Symbol):
@@ -204,10 +204,10 @@ class Parser:
 
 
 expr_parser = Parser()
-expr_parser.define("||", 2, Infix)
-expr_parser.define("^", 3, Infix)
-expr_parser.define("&&", 4, Infix)
-expr_parser.define("<<", 5, Infix)
+expr_parser.define("||", 3, Infix)
+expr_parser.define("^", 4, Infix)
+expr_parser.define("&&", 5, Infix)
+expr_parser.define("<<", 6, Infix)
 expr_parser.define(">>", 6, Infix)
 expr_parser.define("+", 7, Infix)
 expr_parser.define("*", 8, Infix)
@@ -237,6 +237,12 @@ class Reference(Literal):
 class Range(Infix):
     def eval(self, var: dict) -> Any:
         return ZRange(self.first.eval(var), self.second.eval(var))
+
+
+@expr_parser.define("!", 2)
+class Not(Prefix):
+    def eval(self, var: dict) -> Any:
+        return ~self.first.eval(var)
 
 
 @expr_parser.define("-", 7)
@@ -332,7 +338,24 @@ class Context:
             readline.set_completer(self._rl_completer)  # type: ignore
 
     def _rl_completer(self, text: str, state: int) -> str | None:
-        pass
+        try:
+            tokens = list(self.tokenize(text))
+            if tokens[-1].type in ["num", "op"]:
+                return
+            else:
+                options = (
+                    self._keywords
+                    + list(self._functions.keys())
+                    + list(self._settings.keys())
+                    + list(self._variables.keys())
+                )
+                matches = [option for option in options if option.startswith(text)]
+                if state < len(matches):
+                    if matches[state] in self._functions:
+                        return matches[state] + "("
+                    return matches[state]
+        except:
+            return
 
     def _simplify(self, value: int) -> tuple[int, int]:
         flag = 1 if value > 0 else -1
@@ -717,6 +740,62 @@ class Context:
         if not self.redirected_stdin:
             print(f"{name}={self._num2str(self._variables[name])}")
 
+    def diff(self, stmt: Statement) -> None:
+        assert stmt.aftersep
+        var_name = str(stmt.aftersep[0].value)
+        var_value = self.calculate(stmt.aftersep[2:], int, float)
+        result = self._diff(stmt.expr, var_name, var_value)
+        self._variables["ans"] = result
+        print(result)
+
+    def simpson_int(self, stmt: Statement) -> None:
+        assert stmt.aftersep
+        var_name = str(stmt.aftersep[0].value)
+        var_range: ZRange = self.calculate(stmt.aftersep[2:], ZRange)
+        prev_var = self._variables.get(var_name)
+        if not var_range.start < var_range.end:
+            raise ZCalcError(
+                self._code,
+                (stmt.aftersep[2].where[0], stmt.aftersep[-1].where[1]),
+                "invalid range",
+            )
+
+        def simpson(left: int | float, right: int | float) -> float:
+            mid = (left + right) / 2
+            self._variables[var_name] = left
+            fl = self.calculate(stmt.expr, int, float)
+            self._variables[var_name] = mid
+            fm = self.calculate(stmt.expr, int, float)
+            self._variables[var_name] = right
+            fr = self.calculate(stmt.expr, int, float)
+            return (right - left) * (fl + 4 * fm + fr) / 6
+
+        def adaptive_simpson(
+            left: int | float, right: int | float, eps: float, ans: float, step: int
+        ) -> float:
+            mid = (left + right) / 2
+            fl = simpson(left, mid)
+            fr = simpson(mid, right)
+            if abs(fl + fr - ans) <= 15 * eps and step < 0:
+                return fl + fr + (fl + fr - ans) / 15
+            return adaptive_simpson(
+                left, mid, eps / 2, fl, step - 1
+            ) + adaptive_simpson(mid, right, eps / 2, fr, step - 1)
+
+        result = adaptive_simpson(
+            var_range.start,
+            var_range.end,
+            1e-12,
+            simpson(var_range.start, var_range.end),
+            12,
+        )
+        if prev_var:
+            self._variables[var_name] = prev_var
+        else:
+            del self._variables[var_name]
+        self._variables["ans"] = result
+        print(self._num2str(result))
+
     def solve(self, stmt: Statement) -> None:
         assert stmt.aftersep
         var_name = str(stmt.aftersep[0].value)
@@ -754,7 +833,7 @@ class Context:
         if not (
             isinstance(var_range.start, int)
             and isinstance(var_range.end, int)
-            and var_range.start < var_range.end
+            and var_range.start <= var_range.end
         ):
             raise ZCalcError(
                 self._code,
@@ -775,14 +854,6 @@ class Context:
         self._variables["ans"] = math.fsum(results)
         print(self._num2str(self._variables["ans"]))
 
-    def diff(self, stmt: Statement) -> None:
-        assert stmt.aftersep
-        var_name = str(stmt.aftersep[0].value)
-        var_value = self.calculate(stmt.aftersep[2:], int, float)
-        result = self._diff(stmt.expr, var_name, var_value)
-        self._variables["ans"] = result
-        print(result)
-
     def execute(self, code: str) -> None:
         self._code = code
         tokens = list(self.tokenize(code))
@@ -797,12 +868,14 @@ class Context:
             self.set_setting(stmt)
         elif stmt.type == "assign":
             self.assign(stmt)
+        elif stmt.type == "int":
+            self.simpson_int(stmt)
+        elif stmt.type == "diff":
+            self.diff(stmt)
         elif stmt.type == "solve":
             self.solve(stmt)
         elif stmt.type == "sum":
             self.sum(stmt)
-        elif stmt.type == "diff":
-            self.diff(stmt)
         elif stmt.type == "expr":
             print(self._num2str(self.calculate(stmt.expr, int, float)))
 

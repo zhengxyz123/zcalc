@@ -17,10 +17,10 @@ to calculate the expression immediately.
 ## Settings
 You can use the following command to change calculator setttings:
 ```
-set <a setting name> = <an integer value>
+set <a_setting_name>=<an_integer_value>
 ```
 
-Available setting names are:
+Available settings are:
 
 | Name           | Description                                 | Default Value | Notes |
 | :------------: | :-----------------------------------------: | :-----------: | :---: |
@@ -32,3 +32,5 @@ Notes:
 
 1. Available options are `2`, `8`, `10` and `16`.
 2. Pass `0` to disable it. [Learn more about num2str](https://zhengxyz123.github.io/num2str).
+
+There are some undocumented settings, you can find them inside the source code. Changing the values of these settings is not recommended.
