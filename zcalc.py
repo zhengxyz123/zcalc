@@ -31,7 +31,6 @@ from typing import Any, Iterator, NamedTuple
 
 try:
     import readline
-    import rlcompleter
 
     is_rl_available = True
 except ModuleNotFoundError:
@@ -339,21 +338,31 @@ class Context:
 
     def _rl_completer(self, text: str, state: int) -> str | None:
         try:
-            tokens = list(self.tokenize(text))
-            if tokens[-1].type in ["num", "op"]:
+            tokens = list(self.tokenize(readline.get_line_buffer()))  # type: ignore
+            if len(tokens) >= 1 and tokens[-1].type in ["num", "op"]:
                 return
+            if (
+                1 <= len(tokens) <= 2
+                and tokens[0].type == "keyword"
+                and tokens[0].value in ["set", "get"]
+            ):
+                options = list(self._settings.keys())
+            elif len(tokens) > 1:
+                options = list(self._functions.keys()) + list(self._variables.keys())
             else:
                 options = (
                     self._keywords
                     + list(self._functions.keys())
-                    + list(self._settings.keys())
                     + list(self._variables.keys())
                 )
-                matches = [option for option in options if option.startswith(text)]
-                if state < len(matches):
-                    if matches[state] in self._functions:
-                        return matches[state] + "("
-                    return matches[state]
+            matches = [option for option in options if option.startswith(text)]
+
+            if state < len(matches):
+                if matches[state] in self._functions:
+                    return matches[state] + "("
+                elif matches[state] in self._keywords:
+                    return matches[state] + " "
+                return matches[state]
         except:
             return
 
