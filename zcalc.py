@@ -300,6 +300,7 @@ class Context:
             "comb": math.comb,
             "cos": math.cos,
             "cosh": math.cosh,
+            "degrees": math.degrees,
             "erf": math.erf,
             "erfc": math.erfc,
             "exp": math.exp,
@@ -310,6 +311,7 @@ class Context:
             "ln": lambda x: math.log(x),
             "log": math.log,
             "perm": math.perm,
+            "radians": math.radians,
             "sin": math.sin,
             "sinh": math.sinh,
             "sqrt": math.sqrt,
@@ -318,6 +320,7 @@ class Context:
         if sys.version_info >= (3, 11):
             self._functions.setdefault("cbrt", math.cbrt)
         self._settings: dict[str, int] = {
+            "is_readline_available": int(is_rl_available),
             "precision": 15,
             "base": 10,
             "enable_num2str": 1,
@@ -347,6 +350,8 @@ class Context:
                 and tokens[0].value in ["set", "get"]
             ):
                 options = list(self._settings.keys())
+                if tokens[0].value == "set":
+                    options = [option + "=" for option in options]
             elif len(tokens) > 1:
                 options = list(self._functions.keys()) + list(self._variables.keys())
             else:
@@ -358,10 +363,10 @@ class Context:
             matches = [option for option in options if option.startswith(text)]
 
             if state < len(matches):
-                if matches[state] in self._functions:
-                    return matches[state] + "("
-                elif matches[state] in self._keywords:
+                if matches[state] in self._keywords:
                     return matches[state] + " "
+                elif matches[state] in self._functions:
+                    return matches[state] + "("
                 return matches[state]
         except:
             return
@@ -639,7 +644,6 @@ class Context:
             "not": r"!",
             "range": r"~",
             "equal": r"=",
-            "comma": r",",
             "sep": r"\|",
             "bnum": r"0b[01]+",
             "onum": r"0o[0-7]+",
@@ -729,6 +733,8 @@ class Context:
     def set_setting(self, stmt: Statement) -> None:
         name = stmt.expr[0].value
         if name in self._settings:
+            if name == "is_readline_available":
+                raise ZCalcError(self._code, stmt.expr[0].where, "this value cannot be changed")
             self._settings[name] = int(self.calculate(stmt.expr[2:], int))
             if not self.redirected_stdin:
                 print(f"{name}={self._settings[name]}")
