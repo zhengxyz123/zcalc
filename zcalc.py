@@ -297,6 +297,7 @@ class Context:
             "atan": math.atan,
             "atan2": math.atan2,
             "atanh": math.atanh,
+            "ceil": math.ceil,
             "comb": math.comb,
             "cos": math.cos,
             "cosh": math.cosh,
@@ -305,6 +306,8 @@ class Context:
             "erfc": math.erfc,
             "exp": math.exp,
             "expm1": math.expm1,
+            "factorial": math.factorial,
+            "floor": math.floor,
             "gamma": math.gamma,
             "lgamma": math.lgamma,
             "lg": math.log10,
@@ -507,6 +510,19 @@ class Context:
                     return f"{flag}({expr})/{c}"
         return str(value)
 
+    def _is_assignment_stmt(self, tokens: list[Token]) -> bool:
+        if len(tokens) < 2:
+            return False
+        if not tokens[0].type in ["keyword", "name"]:
+            return False
+        if not tokens[1].type == "equal":
+            return False
+        if len(tokens) == 2:
+            raise ZCalcError(
+                self._code, (len(self._code), len(self._code) + 1), "syntax error"
+            )
+        return True
+
     def _is_exit_stmt(self, tokens: list[Token]) -> bool:
         if not (tokens[0].type == "keyword" and tokens[0].value == "exit"):
             return False
@@ -560,17 +576,6 @@ class Context:
                 (tokens[1].where[0], tokens[-1].where[1]),
                 'must have one "|"',
             )
-        return True
-
-    def _is_assignment_stmt(self, tokens: list[Token]) -> bool:
-        if len(tokens) < 3:
-            return False
-        if not tokens[0].type == "name":
-            return False
-        if not tokens[1].type == "equal":
-            return False
-        if tokens[0].value in ["ans", "e", "pi", "tau"]:
-            raise ZCalcError(self._code, tokens[0].where, "can't assign const variable")
         return True
 
     def _parse_ssdi_stmt(self, tokens: list[Token]) -> Statement:
@@ -683,7 +688,9 @@ class Context:
             yield Token(kind, value, where)
 
     def parse(self, tokens: list[Token]) -> Statement:
-        if self._is_exit_stmt(tokens):
+        if self._is_assignment_stmt(tokens):
+            return Statement("assign", tokens, None)
+        elif self._is_exit_stmt(tokens):
             return Statement("exit", [], None)
         elif self._is_set_stmt(tokens):
             return Statement("set", tokens[1:], None)
@@ -691,8 +698,6 @@ class Context:
             return Statement("get", tokens[1:], None)
         elif self._is_ssdi_stmt(tokens):
             return self._parse_ssdi_stmt(tokens)
-        elif self._is_assignment_stmt(tokens):
-            return Statement("assign", tokens, None)
         else:
             return Statement("expr", tokens, None)
 
@@ -734,7 +739,9 @@ class Context:
         name = stmt.expr[0].value
         if name in self._settings:
             if name == "is_readline_available":
-                raise ZCalcError(self._code, stmt.expr[0].where, "this value cannot be changed")
+                raise ZCalcError(
+                    self._code, stmt.expr[0].where, "this value cannot be changed"
+                )
             self._settings[name] = int(self.calculate(stmt.expr[2:], int))
             if not self.redirected_stdin:
                 print(f"{name}={self._settings[name]}")
@@ -746,7 +753,15 @@ class Context:
     def assign(self, stmt: Statement) -> None:
         name = str(stmt.expr[0].value)
         expr = stmt.expr[2:]
-        if name in self._functions:
+        if name in ["e", "pi", "tau"]:
+            raise ZCalcError(
+                self._code, stmt.expr[0].where, "can't assign const variable"
+            )
+        elif name in self._keywords:
+            raise ZCalcError(
+                self._code, stmt.expr[0].where, "can't assign a name of keyword"
+            )
+        elif name in self._functions:
             raise ZCalcError(
                 self._code, stmt.expr[0].where, "can't assign a name of function"
             )

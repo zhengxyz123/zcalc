@@ -56,22 +56,35 @@ zcalc uses the same operator as Python, except:
 | `&&`     | `&`       |
 | `\|\|`   | `\|`      |
 
-zcalc uses a five-point template to compute numerical differentiation. If you want to calculate $\dfrac{\mathrm{d}}{\mathrm{d}x}\sin x|_{x=\pi}$, type:
+zcalc provides a lot of functions, they are:
+
+- Number-theoretic and representation functions: `abs(x)`, `ceil(x)`, `comb(n, k)`, `factorial(n)`, `floor(x)` and `perm(n, k=None)`
+- Power and logarithmic functions: `cbrt(x)`, `exp(x)`, `expm1(x)`, `lg(x)`, `ln(x)`, `log(x, base=e)` and `sqrt(x)`
+- Trigonometric functions: `acos(x)`, `asin(x)`, `atan(x)`, `atan(y, x)`, `cos(x)`, `sin(x)` and `tan(x)`
+- Angular conversion functions: `degrees(x)` and `radians(x)`
+- Hyperbolic functions: `acosh(x)`, `asinh(x)`, `atanh(x)`, `cosh(x)`, `sinh(x)` and `tanh(x)`
+- Special functions: `erf(x)`, `erfc(x)`, `gamma(x)` and `lgamma(x)`
+
+zcalc also defines 3 constants that cannot be reassigned: `e`, `pi` and `tau`.
+
+The `ans` variable stores the result of the last calculation.
+
+zcalc uses a five-point template to compute numerical differentiation. If you want to calculate $\frac{\mathrm{d}}{\mathrm{d}x}\sin x|_{x=\pi}$, type:
 ```
 diff sin(x)|x=pi
 ```
 
-zcalc uses Adaptive Simpson′s Rule to compute numerical differentiation, if you want to calculte $\int\nolimits_1^2e^x\;\mathrm{d}x$, enter:
+zcalc uses Adaptive Simpson′s Rule to compute numerical differentiation, if you want to calculte $\int_1^2e^x\;\mathrm{d}x$, enter:
 ```
 int e**x|x=1~2
 ```
 
-zcalc uses Newton's method to solve equations. If you want to solve $\sin x=\dfrac{1}{2}$, type:
+zcalc uses Newton's method to solve equations. If you want to solve $\sin x=\frac{1}{2}$, type:
 ```
 solve sin(x)-1/2|x=1
 ```
 
-If you want to calculate $\sum\nolimits_{n=1}^{100}2^n$, enter:
+If you want to calculate $\sum_{n=1}^{100}2^n$, enter:
 ```
 sum 2**n|x=1~100
 ```
