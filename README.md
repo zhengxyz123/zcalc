@@ -74,7 +74,7 @@ zcalc uses a five-point template to compute numerical differentiation. If you wa
 diff sin(x)|x=pi
 ```
 
-zcalc uses Adaptive Simpson′s Rule to compute numerical differentiation, if you want to calculte $\int_1^2e^x\;\mathrm{d}x$, enter:
+zcalc uses Adaptive Simpson′s Rule to compute numerical differentiation, if you want to calculte $\int_1^2e^x\mathrm{d}x$, enter:
 ```
 int e**x|x=1~2
 ```
