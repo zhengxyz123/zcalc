@@ -22,11 +22,13 @@
 # SOFTWARE.
 
 import argparse
+import atexit
 import math
 import operator
 import re
 import sys
 from fractions import Fraction
+from pathlib import Path
 from typing import Any, Iterator, NamedTuple
 
 try:
@@ -36,7 +38,7 @@ try:
 except ModuleNotFoundError:
     is_rl_available = False
 
-__version__ = "0.9"
+__version__ = "1.0"
 operators_reg = {
     "**": operator.pow,
     "*": operator.mul,
@@ -50,6 +52,14 @@ operators_reg = {
     "^": operator.xor,
     "||": operator.or_,
 }
+
+
+@atexit.register
+def write_history():
+    if is_rl_available and __name__ == "__main__":
+        if not (f := Path.home() / ".zcalc_history").exists():
+            f.touch()
+        readline.write_history_file(Path.home() / ".zcalc_history")  # type: ignore
 
 
 class ZCalcError(Exception):
@@ -103,13 +113,13 @@ class Symbol:
         self.second = None
 
     def nud(self) -> "Symbol":
-        raise NotImplementedError("")
+        raise NotImplementedError("unsupported operation")
 
     def led(self, left: "Symbol") -> "Symbol":
-        raise NotImplementedError("")
+        raise NotImplementedError("unsupported operation")
 
     def eval(self, var: dict) -> Any:
-        raise NotImplementedError("")
+        raise NotImplementedError("unsupported operation")
 
 
 class Literal(Symbol):
@@ -340,6 +350,9 @@ class Context:
         self.redirected_stdin = False
         if is_rl_available and __name__ == "__main__":
             readline.parse_and_bind("tab:complete")  # type: ignore
+            readline.set_history_length(1000)  # type: ignore
+            if (f := Path.home() / ".zcalc_history").exists():
+                readline.read_history_file(f)  # type: ignore
             readline.set_completer(self._rl_completer)  # type: ignore
 
     def _rl_completer(self, text: str, state: int) -> str | None:
@@ -939,13 +952,18 @@ def main() -> int:
     while True:
         try:
             expr = input(">>> ")
-        except (EOFError, KeyboardInterrupt):
+        except EOFError:
             print()
             sys.exit(0)
+        except KeyboardInterrupt:
+            print()
+            continue
         try:
             ctx.execute(expr)
         except ZCalcError as error:
             display_error(error)
+        except KeyboardInterrupt:
+            print()
 
 
 if __name__ == "__main__":

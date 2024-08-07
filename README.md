@@ -59,7 +59,7 @@ zcalc uses the same operator as Python, except:
 zcalc provides a lot of functions, they are:
 
 - Number-theoretic and representation functions: `abs(x)`, `ceil(x)`, `comb(n, k)`, `factorial(n)`, `floor(x)` and `perm(n, k=None)`
-- Power and logarithmic functions: `cbrt(x)`, `exp(x)`, `expm1(x)`, `lg(x)`, `ln(x)`, `log(x, base=e)` and `sqrt(x)`
+- Power and logarithmic functions: `cbrt(x)`(Python 3.11 and above), `exp(x)`, `expm1(x)`, `lg(x)`, `ln(x)`, `log(x, base=e)` and `sqrt(x)`
 - Trigonometric functions: `acos(x)`, `asin(x)`, `atan(x)`, `atan(y, x)`, `cos(x)`, `sin(x)` and `tan(x)`
 - Angular conversion functions: `degrees(x)` and `radians(x)`
 - Hyperbolic functions: `acosh(x)`, `asinh(x)`, `atanh(x)`, `cosh(x)`, `sinh(x)` and `tanh(x)`
